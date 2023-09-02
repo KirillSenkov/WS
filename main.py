@@ -49,13 +49,13 @@ if __name__ == '__main__':
 
     for div in div_article_list_tags:
         if is_text_match(div.text) and div.text.find('дисциплин') > 0:
-            pp(t + ' - ' +
-               div.text + div.?)
-
+            href = div.find(class_='serp-item__title').get('href')
+            fork = div.find(attrs={'data-qa': True}
+                            ).get('data-qavacancy-serp__vacancy-compensation')
+            pp(div)
     # Записать в json информацию о каждой вакансии:
     # - ссылка
     # - вилка зп
-    # - название компании
     # - город
 
     #
