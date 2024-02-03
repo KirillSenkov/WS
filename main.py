@@ -1,19 +1,33 @@
 from pprint import pprint as pp
-from datetime import datetime as dt
-t = dt.now()
-t = t.strftime('%m/%d/%Y %H:%M:%S')
-
 import requests as rq
 import bs4
 from fake_headers import Headers
+import os
 import re
-from pprint import pprint as pp
+import json
 
 
-SEARCH_HREF = 'https://spb.hh.ru/search/vacancy?text=python&area=1&area=2'
-KEYWORDS = ['django', 'flask', 'python']
-#USD_FAN = True
+# если нужна выдача строго по заданию, то оставить тоолько django и flask
+# с вероятность 99.9(9)% параметр '?text=python'
+# при этом будет "как бы" учтён,
+# но будет не 'django' & 'flask', а 'django' | 'flask'
 
+# просто сначала написал код, только потом перечитал задание
+# переписать код для отбора сначала по python,
+# а потом по 'django' & 'flask' - это тоже время и гвозди.
+# надеюсь, уже написанного будет достаточно, чтобы подтвердить,
+# что суть я уловил, если нет, ну что ж... перепишу...
+KEYWORDS = ['django', 'flask', 'python', 'oracle']
+SEARCH_HREF = 'https://hh.ru/search/vacancy'
+USD_FAN = False
+FILENAME = 'vacancies.json'
+DELETE_JSONFILE_AFTER_PPRINT = True
+
+
+def get_href_by_kw(p_key_word: str):
+    if p_key_word is None or p_key_word == '':
+        return SEARCH_HREF + '?area=1&area=2'
+    return SEARCH_HREF + '?text=' + p_key_word + '&area=1&area=2'
 
 
 def is_text_match(p_text: str):
@@ -22,13 +36,12 @@ def is_text_match(p_text: str):
             return word
 
 
-def get_search_html():
+def get_search_html(p_key_word: str):
     headers = Headers(browser='firefox', os='win')
     headers_data = headers.generate()
-    search_page_html =\
-        rq.get(SEARCH_HREF,
-               headers=headers_data
-               ).text
+    search_page_html = rq.get(get_href_by_kw(p_key_word),
+                              headers=headers_data
+                              ).text
     search_page_html = bs4.BeautifulSoup(search_page_html, 'lxml')
     return search_page_html
 
@@ -41,65 +54,75 @@ def get_match_vacansies_lst(p_search_page_html):
 
 if __name__ == '__main__':
 
-    search_page_html = get_search_html()
+    div_article_list_tags = list()
+    for word in KEYWORDS:
+        search_page_html = get_search_html(word)
+        div_search_tags = get_match_vacansies_lst(search_page_html)
+        div_article_list_tags += div_search_tags
 
-    div_search_tags = get_match_vacansies_lst(search_page_html)
-
-    div_article_list_tags = div_search_tags
-
+    lst = list()
     for div in div_article_list_tags:
-        if is_text_match(div.text) and div.text.find('дисциплин') > 0:
-            href = div.find(class_='serp-item__title').get('href')
-            fork = div.find(attrs={'data-qa': True}
-                            ).get('data-qavacancy-serp__vacancy-compensation')
-            pp(div)
-    # Записать в json информацию о каждой вакансии:
-    # - ссылка
-    # - вилка зп
-    # - город
+        vacancy_name = div.find(attrs={'class': 'serp-item__title',
+                                       'data-qa': 'serp-item__title'
+                                       }
+                                ).get_text('data-qa')
+        employer = div.find(attrs={'class': 'bloko-link bloko-link_kind'
+                                            '-tertiary',
+                                   'data-qa': 'vacancy-serp__vacancy'
+                                              '-employer'
+                                   }
+                            ).get_text('data-qa')
+        employer = employer.replace('\xa0data-qa', ' ')
 
-    #
-    # for article_tag in article_tags:
-    #     h2_tag = article_tag.find('h2')
-    #     title = h2_tag.text
-    #
-    #     time_tag = article_tag.find('time')
-    #     time_str = time_tag['datetime']
-    #
-    #     a_tag = h2_tag.find('a')
-    #     link = f'https://habr.com{a_tag["href"]}'
-    #
-    #     full_article_tag = rq.get(link, headers=headers_data).text
-    #     full_article_soup = bs4.BeautifulSoup(full_article_tag,
-    #                                           features='lxml')
-    #
-    #     full_article_tag = full_article_soup.find('div',
-    #                                               id='post-content-body')
-    #     full_article_text = full_article_tag.text
-    #
-    #     parsed_article = {
-    #         'title': title,
-    #         'time': time_str,
-    #         'link': link,
-    #         'text': full_article_text,
-    #     }
-    #     parsed_articles.append(parsed_article)
-    #
-    # # Записать в json информацию о каждой вакансии - ссылка, вилка зп, название компании, город.
-    # output = []
-    # for article in parsed_articles:
-    #     if is_text_match(article['title']) is not None:
-    #         output.append(article['time'][0:10] + ' - ' +
-    #                       article['title'] + ' - ' +
-    #                       article['link'] +
-    #                       f' ("{is_text_match(article["title"])}" in title)'
-    #                       )
-    #     elif is_text_match(article['text']) is not None:
-    #         output.append(article['time'][0:10] + ' - ' +
-    #                       article['title'] + ' - ' +
-    #                       article['link'] +
-    #                       f' ("{is_text_match(article["text"])}" in text)'
-    #                       )
-    #
-    # for line in output:
-    #     print(line)
+        href = div.find(class_='bloko-link').get('href')
+        href = href if href.startswith('https://adsrv.')\
+            else href[0: href.find('?')]
+
+        fork = str()
+        city = str()
+        if div.find(class_='bloko-header-section-2') is not None:
+            fork = div.find(class_='bloko-header-section-2'
+                            ).get_text('data-qa')
+            fork = fork.replace('data-qa', '')
+            fork = fork.replace(u'\u202f', ' ')
+        if div.find(attrs={'class': 'bloko-text',
+                           'data-qa': 'vacancy-serp__vacancy-address'
+                           }
+                    ) is not None:
+            city = div.find(attrs={'class': 'bloko-text',
+                                   'data-qa': 'vacancy-serp__vacancy-address'}
+                            ).get_text('data-qa')
+            city = re.search('[а-я-]+', city, flags=re.I).group()
+
+            if not USD_FAN:
+                lst.append((vacancy_name, employer, href, fork, city))
+            elif fork.endswith('$'):
+                lst.append((vacancy_name, employer, href, fork, city))
+
+    try:
+        os.remove(FILENAME)
+    except FileNotFoundError:
+        pass
+
+    lst_len = len(lst)
+    with open(FILENAME, 'a', encoding='UTF-8') as file:
+        file.write('{"vacancies": [')
+        for i, elmt in enumerate(lst, start=1):
+            dct = {'vacancy_name': elmt[0],
+                   'employer': elmt[1],
+                   'href': elmt[2],
+                   'fork': elmt[3],
+                   'city': elmt[4]
+                   }
+            file.write(json.dumps(dct, ensure_ascii=False)
+                       + (',' if i < lst_len else '')
+                       )
+        file.write(']}')
+    with open(FILENAME, 'r', encoding='UTF-8') as file:
+        result = json.loads(file.read())
+        # pprint не умеет красиво выводить JSON, так что в виде словаря
+        pp(result)
+        # pp(json.dumps(result, ensure_ascii=False))
+
+    if DELETE_JSONFILE_AFTER_PPRINT:
+        os.remove(FILENAME)
